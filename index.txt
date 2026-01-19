@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Period Tracker</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
+        h1 { text-align: center; }
+        .calendar-container { display: flex; flex-direction: column; align-items: center; }
+        .calendar { margin: 30px 0; max-width: 400px; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ccc; padding: 12px; text-align: center; }
+        th { background: #f0f0f0; }
+        .period { background-color: rgb(248, 150, 166); font-weight: bold; }          /* Actual period - strong pink */
+        .likely-period { background-color: rgb(255, 205, 214); font-weight: bold; } /* Predicted/likely period - light pink */
+        .fertile { background-color: rgb(230, 200, 255); }                          /* Fertile window - light purple */
+        .month-info { margin-top: 12px; padding: 12px; background: #f9f9f9; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95em; }
+        .button-container { text-align: center; margin: 40px 0; }
+        button { padding: 12px 24px; font-size: 16px; cursor: pointer; }
+        .summary { text-align: center; margin: 40px 0; }
+        .summary ul { display: inline-block; text-align: left; list-style: none; padding: 0; }
+        .summary li { margin: 8px 0; }
+    </style>
+</head>
+<body>
+    <h1>Period Tracker</h1>
+
+    <div class="calendar-container" id="calendars"></div>
+
+    <div class="summary" id="summary"></div>
+
+    <div class="button-container">
+        <button onclick="alert('To see months before December 2025 (back to August 2025), just add the period start & end dates to the periods array in the code!')">
+            Show Previous Months (back to August 2025)
+        </button>
+    </div>
+
+    <script>
+        // ╔════════════════════════════════════════════════════╗
+        // ║   Only edit this array!                            ║
+        // ║   Format: ["YYYY-MM-DD", "YYYY-MM-DD"]             ║
+        // ║   Start date must come before end date             ║
+        // ╚════════════════════════════════════════════════════╝
+        const periods = [
+            ["2025-12-20", "2025-12-24"],   // Dec 20–24
+            ["2026-01-18", "2026-01-19"],   // Jan 18–19
+            // Add older periods here if you want (oldest at top)
+            // ["2025-11-22", "2025-11-26"],
+        ];
+
+        // ──────────────────────────────────────────────────────────────
+        // Everything below is calculated automatically
+        // ──────────────────────────────────────────────────────────────
+
+        function toDate(str) {
+            return new Date(str + "T00:00:00");
+        }
+
+        function formatDate(date) {
+            const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+            return `${months[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
+        }
+
+        // Sort periods by start date (oldest → newest)
+        periods.sort((a,b) => toDate(a[0]) - toDate(b[0]));
+
+        const periodStarts = periods.map(([start]) => toDate(start));
+
+        // Calculate cycle lengths (days between consecutive starts)
+        const cycleLengths = [];
+        for (let i = 1; i < periodStarts.length; i++) {
+            const daysBetween = Math.round((periodStarts[i] - periodStarts[i-1]) / (1000*60*60*24));
+            cycleLengths.push(daysBetween);
+        }
+
+        const avgCycle = cycleLengths.length > 0
+            ? Math.round(cycleLengths.reduce((a,b)=>a+b,0) / cycleLengths.length)
+            : null;
+
+        // Average period duration
+        const periodDurations = periods.map(([s,e]) => 
+            Math.round((toDate(e) - toDate(s)) / (1000*60*60*24)) + 1
+        );
+        const avgDuration = periodDurations.length > 0
+            ? (periodDurations.reduce((a,b)=>a+b,0) / periodDurations.length).toFixed(1)
+            : "—";
+
+        // Last known period
+        const lastPeriod = periods[periods.length-1];
+        const lastStartDate = lastPeriod ? toDate(lastPeriod[0]) : null;
+
+        // ─── Create calendar for a given year & month ───
+        function createCalendar(year, month) {  // month = 0..11
+            const date = new Date(year, month, 1);
+            const firstDay = date.getDay();
+            const daysInMonth = new Date(year, month+1, 0).getDate();
+
+            let html = `<h2>${date.toLocaleString('default', { month: 'long' })} ${year}</h2>`;
+            html += `<table><tr><th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th></tr><tr>`;
+
+            // Empty cells before day 1
+            for (let i = 0; i < firstDay; i++) html += `<td></td>`;
+
+            for (let day = 1; day <= daysInMonth; day++) {
+                const current = new Date(year, month, day);
+                let cls = "";
+
+                // Actual recorded period
+                for (const [startStr, endStr] of periods) {
+                    const pStart = toDate(startStr);
+                    const pEnd   = toDate(endStr);
+                    if (current >= pStart && current <= pEnd) {
+                        cls = "period";
+                        break;
+                    }
+                }
+
+                // Predicted / likely period & fertile window
+                if (!cls && lastStartDate && avgCycle) {
+                    const predictedNextStart = new Date(lastStartDate);
+                    predictedNextStart.setDate(predictedNextStart.getDate() + avgCycle);
+
+                    // Days since last period start
+                    const daysSinceLast = Math.round((current - lastStartDate) / (86400000));
+
+                    // Fertile window: approx days 10–17 after period start
+                    if (daysSinceLast >= 10 && daysSinceLast <= 17) {
+                        cls = "fertile";
+                    }
+
+                    // Likely period days (predicted next period ±2 days for safety)
+                    const predictedEnd = new Date(predictedNextStart);
+                    predictedEnd.setDate(predictedEnd.getDate() + 4); // rough estimate
+                    if (current >= predictedNextStart && current <= predictedEnd) {
+                        cls = "likely-period";
+                    }
+                }
+
+                html += `<td class="${cls}">${day}</td>`;
+
+                if ((firstDay + day) % 7 === 0) html += "</tr><tr>";
+            }
+
+            // Fill remaining cells
+            const remaining = (firstDay + daysInMonth) % 7;
+            if (remaining !== 0) {
+                for (let i = remaining; i < 7; i++) html += `<td></td>`;
+            }
+            html += "</tr></table>";
+
+            // Month info
+            let info = "";
+            const thisMonthPeriod = periods.find(([s]) => {
+                const d = toDate(s);
+                return d.getFullYear() === year && d.getMonth() === month;
+            });
+
+            if (thisMonthPeriod) {
+                const [s, e] = thisMonthPeriod;
+                info = `
+                    <p><strong>Period:</strong> ${formatDate(toDate(s))} – ${formatDate(toDate(e))}</p>
+                    <p><strong>Duration:</strong> ${Math.round((toDate(e)-toDate(s))/86400000)+1} days</p>
+                `;
+            } else if (lastStartDate && avgCycle) {
+                const predictedStart = new Date(lastStartDate);
+                predictedStart.setDate(predictedStart.getDate() + avgCycle);
+                if (predictedStart.getMonth() === month && predictedStart.getFullYear() === year) {
+                    info = `
+                        <p><strong>Predicted next period:</strong> ~${formatDate(predictedStart)}</p>
+                        <p><strong>Based on:</strong> ${avgCycle}-day average cycle</p>
+                        <p><em>(Actual dates may vary)</em></p>
+                    `;
+                }
+            }
+
+            if (info) html += `<div class="month-info">${info}</div>`;
+
+            return html;
+        }
+
+        // Render recent + predicted months (most recent on top)
+        function renderCalendars() {
+            const container = document.getElementById("calendars");
+            container.innerHTML = "";
+
+            const monthsToShow = [
+                {y: 2026, m: 1},   // Feb 2026 (predicted)
+                {y: 2026, m: 0},   // Jan 2026 (current)
+                {y: 2025, m: 11},  // Dec 2025
+            ];
+
+            monthsToShow.forEach(({y, m}) => {
+                const div = document.createElement("div");
+                div.className = "calendar";
+                div.innerHTML = createCalendar(y, m);
+                container.appendChild(div);
+            });
+        }
+
+        // Summary
+        function renderSummary() {
+            const el = document.getElementById("summary");
+            const starts = periodStarts.map(d => formatDate(d)).join(" • ");
+
+            let cyclesText = cycleLengths.length > 0 
+                ? cycleLengths.join(", ") 
+                : "—";
+
+            el.innerHTML = `
+                <p><strong>Overall summary:</strong></p>
+                <ul>
+                    <li>Average cycle length: ${avgCycle ? avgCycle + ' days' : '—'}</li>
+                    <li>Average period duration: ${avgDuration} days</li>
+                    <li>Period starts: ${starts || "—"}</li>
+                    <li>Cycle lengths: ${cyclesText} days</li>
+                </ul>
+            `;
+        }
+
+        // Run
+        renderCalendars();
+        renderSummary();
+    </script>
+</body>
+</html>
